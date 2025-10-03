@@ -6,12 +6,14 @@ public class WebsiteDiscoveryProvider(
     IProgressiveCache cache,
     IWebsiteChannelContext website,
     IContentQueryExecutor executor,
-    IWebsiteDiscoveryOptions options) : IWebsiteDiscoveryProvider
+    IWebsiteDiscoveryOptions options,
+    IHttpContextAccessor httpContextAccessor) : IWebsiteDiscoveryProvider
 {
     private readonly IProgressiveCache cache = cache;
     private readonly IWebsiteChannelContext website = website;
     private readonly IContentQueryExecutor executor = executor;
     private readonly IWebsiteDiscoveryOptions options = ValidateOptions(options);
+    private readonly IHttpContextAccessor httpContextAccessor = httpContextAccessor;
 
     private static IWebsiteDiscoveryOptions ValidateOptions(IWebsiteDiscoveryOptions options)
     {
@@ -50,23 +52,51 @@ public class WebsiteDiscoveryProvider(
         var sitemapItems = await GetSitemapPages();
         return new SitemapProvider().CreateSitemap(new SitemapModel(sitemapItems));
     }
-    public async Task<List<SitemapNode>> GetSitemapPages() =>
+
+    public async Task<ActionResult> GenerateLlmsTxt()
+    {
+        var pages = await GetSitemapPagesWithDetails();
+        var sb = new StringBuilder();
+        var currentRequest = httpContextAccessor.HttpContext?.Request;
+
+        sb.AppendLine($"# {website.WebsiteChannelName}");
+        sb.AppendLine();
+        sb.AppendLine("## Pages");
+        sb.AppendLine();
+
+        foreach (var page in pages)
+        {
+            string title = !string.IsNullOrWhiteSpace(page.Title) ? page.Title : page.SystemFields.WebPageItemName;
+            string relativeUrl = page.SystemFields.WebPageUrlPath;
+            string url = currentRequest != null ? relativeUrl.AbsoluteURL(currentRequest) : relativeUrl;
+
+            if (!string.IsNullOrWhiteSpace(page.Description))
+            {
+                sb.AppendLine($"- [{title.CleanHtml().EscapeMarkdown().Replace("â€™s", "")}]({url.ToLower()}): {page.Description.CleanHtml().EscapeMarkdown().Replace("â€™s", "")}");
+            }
+            else
+            {
+                sb.AppendLine($"- [{title.CleanHtml().EscapeMarkdown().Replace("â€™s", "")}]({url.ToLower()})");
+            }
+        }
+
+        return new ContentResult
+        {
+            Content = sb.ToString(),
+            ContentType = "text/plain; charset=utf-8"
+        };
+    }
+
+    private async Task<List<SitemapPage>> GetSitemapPagesWithDetails() =>
         await cache.LoadAsync(cs =>
         {
             cs.CacheDependency = CacheHelper.GetCacheDependency(BuildCacheDependencyKeys());
 
-            return GetSitemapNodesInternal();
-        }, new CacheSettings(3, [nameof(GetSitemapPages)]) { });
+            return GetSitemapPagesInternal();
+        }, new CacheSettings(60, [nameof(GetSitemapPagesWithDetails)]) { });
 
-    private string[] BuildCacheDependencyKeys() =>
-        options.ContentTypeDependencies
-            .Select(t => $"webpageitem|bychannel|{website.WebsiteChannelName}|bycontenttype|{t}")
-            .ToArray();
-
-    private async Task<List<SitemapNode>> GetSitemapNodesInternal()
+    private async Task<List<SitemapPage>> GetSitemapPagesInternal()
     {
-        var nodes = new List<SitemapNode>();
-
         var b = new ContentItemQueryBuilder()
             .ForContentTypes(c => c
                 .OfReusableSchema(options.ReusableSchemaName)
@@ -104,13 +134,29 @@ public class WebsiteDiscoveryProvider(
             }, isInSitemap, title, description);
         });
 
+        return pages.Where(p => p.IsInSitemap).ToList();
+    }
+
+    public async Task<List<SitemapNode>> GetSitemapPages() =>
+        await cache.LoadAsync(cs =>
+        {
+            cs.CacheDependency = CacheHelper.GetCacheDependency(BuildCacheDependencyKeys());
+
+            return GetSitemapNodesInternal();
+        }, new CacheSettings(60, [nameof(GetSitemapPages)]) { });
+
+    private string[] BuildCacheDependencyKeys() =>
+        options.ContentTypeDependencies
+            .Select(t => $"webpageitem|bychannel|{website.WebsiteChannelName}|bycontenttype|{nameof(WebsiteDiscoveryProvider)}|{t}")
+            .ToArray();
+
+    private async Task<List<SitemapNode>> GetSitemapNodesInternal()
+    {
+        var pages = await GetSitemapPagesInternal();
+        var nodes = new List<SitemapNode>();
+
         foreach (var page in pages)
         {
-            if (!page.IsInSitemap)
-            {
-                continue;
-            }
-
             var node = new SitemapNode(page.SystemFields.WebPageUrlPath)
             {
                 LastModificationDate = DateTime.Now,

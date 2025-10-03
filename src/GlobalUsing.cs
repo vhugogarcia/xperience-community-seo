@@ -13,3 +13,7 @@ global using SimpleMvcSitemap;
 
 global using XperienceCommunity.SEO.Models;
 global using XperienceCommunity.SEO.Services;
+global using XperienceCommunity.SEO.Helpers;
+global using XperienceCommunity.SEO.Extensions;
+
+global using System.Text;
