@@ -9,7 +9,7 @@
     <PackageReleaseNotes>https://github.com/vhugogarcia/xperience-community-seo</PackageReleaseNotes>
     <PackageIcon>logo.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>kentico;xperience;seo;ai</PackageTags>
+    <PackageTags>kentico;xperience;seo;ai;llms;sitemap;robotstxt</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
